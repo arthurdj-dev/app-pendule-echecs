@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     StyleSheet,
     Text, TouchableOpacity,
@@ -20,7 +21,7 @@ export default function GameScreen({ route, navigation }) {
   const { theme } = useTheme();
 
   const [times, setTimes]   = useState([timeWhite, timeBlack]);
-  const [active, setActive] = useState(null);   // null = pas commencé, 0 ou 1
+  const [active, setActive] = useState(null);
   const [paused, setPaused] = useState(false);
   const [moves,  setMoves]  = useState([0, 0]);
   const [over,   setOver]   = useState(false);
@@ -37,6 +38,20 @@ export default function GameScreen({ route, navigation }) {
       intervalRef.current = null;
     }
   };
+
+  // Reset propre quand on quitte l'écran (bouton retour Android)
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        stopInterval();
+        setTimes([timeWhite, timeBlack]);
+        setActive(null);
+        setPaused(false);
+        setMoves([0, 0]);
+        setOver(false);
+      };
+    }, [])
+  );
 
   const startInterval = useCallback((player) => {
     stopInterval();
@@ -67,19 +82,15 @@ export default function GameScreen({ route, navigation }) {
     if (over) return;
     if (paused) return;
 
-    // Premier coup : joueur 0 appuie pour lancer le timer de joueur 1, etc.
     if (active === null) {
-      // Le joueur qui appuie passe la main à l'adversaire
       const next = player === 0 ? 1 : 0;
       setActive(next);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       return;
     }
 
-    // Seulement le joueur actif peut appuyer
     if (active !== player) return;
 
-    // Incrément Fischer
     setTimes(prev => {
       const next = [...prev];
       next[player] = next[player] + increment;
@@ -111,29 +122,13 @@ export default function GameScreen({ route, navigation }) {
     setOver(false);
   };
 
-  useEffect(() => {
-    if (over) {
-      const loser = times[0] === 0 ? 0 : 1;
-      const winner = loser === 0 ? 1 : 0;
-      setTimeout(() => {
-        navigation.replace('End', {
-          winner,
-          timeLeft: times[winner],
-          moves,
-          timeWhite,
-          timeBlack,
-          increment,
-        });
-      }, 1200);
-    }
-  }, [over]);
-
   const s = styles(theme);
 
   const renderZone = (player) => {
     const isActive  = active === player && !paused && !over;
     const isUrgent  = times[player] <= 10 && times[player] > 0;
-    const isDead    = times[player] === 0;
+    const isDead    = over && times[player] === 0;
+    const isWinner  = over && times[player] > 0;
     const flipped   = player === 0;
 
     return (
@@ -142,23 +137,37 @@ export default function GameScreen({ route, navigation }) {
           s.zone,
           isActive  && s.zoneActive,
           isDead    && s.zoneDead,
-          !isActive && active !== null && !isDead && s.zoneInactive,
+          isWinner  && s.zoneWinner,
+          !isActive && !isDead && !isWinner && active !== null && s.zoneInactive,
         ]}
         onPress={() => handlePress(player)}
         activeOpacity={0.85}
       >
         <View style={[s.zoneInner, flipped && { transform: [{ rotate: '180deg' }] }]}>
-          <Text style={[s.timer, isUrgent && s.timerUrgent, isDead && s.timerDead]}>
-            {fmt(times[player])}
-          </Text>
-          <Text style={[s.moves, isActive && s.movesActive]}>
-            {moves[player]} coup{moves[player] !== 1 ? 's' : ''}
-          </Text>
-          {active === null && (
-            <Text style={s.hint}>Appuyez pour commencer</Text>
-          )}
-          {isActive && (
-            <Text style={s.hint}>À vous de jouer</Text>
+          {isDead ? (
+            <>
+              <Text style={s.flag}>🏳️</Text>
+              <Text style={s.timerDead}>00:00</Text>
+              <Text style={s.loserLabel}>Temps écoulé</Text>
+            </>
+          ) : (
+            <>
+              <Text style={[s.timer, isUrgent && s.timerUrgent, isWinner && s.timerWinner]}>
+                {fmt(times[player])}
+              </Text>
+              <Text style={[s.moves, isActive && s.movesActive]}>
+                {moves[player]} coup{moves[player] !== 1 ? 's' : ''}
+              </Text>
+              {active === null && (
+                <Text style={s.hint}>Appuyez pour commencer</Text>
+              )}
+              {isActive && (
+                <Text style={s.hint}>À vous de jouer</Text>
+              )}
+              {isWinner && (
+                <Text style={s.hint}>🏆 Victoire !</Text>
+              )}
+            </>
           )}
         </View>
       </TouchableOpacity>
@@ -192,10 +201,14 @@ const styles = (t) => StyleSheet.create({
   zoneActive:    { backgroundColor: t.active },
   zoneInactive:  { backgroundColor: t.inactive, opacity: 0.6 },
   zoneDead:      { backgroundColor: '#B71C1C' },
+  zoneWinner:    { backgroundColor: '#1B5E20' },
   zoneInner:     { alignItems: 'center', gap: 8 },
   timer:         { fontSize: 72, fontWeight: '300', color: t.text, fontVariant: ['tabular-nums'] },
   timerUrgent:   { color: t.urgent, fontWeight: '600' },
-  timerDead:     { color: '#FFFFFF' },
+  timerDead:     { fontSize: 72, fontWeight: '300', color: '#FFFFFF' },
+  timerWinner:   { color: '#FFFFFF' },
+  loserLabel:    { fontSize: 16, color: '#FFCDD2', marginTop: 8 },
+  flag:          { fontSize: 48, marginBottom: 8 },
   moves:         { fontSize: 16, color: t.subtext },
   movesActive:   { color: t.text },
   hint:          { fontSize: 13, color: t.subtext, marginTop: 8 },
