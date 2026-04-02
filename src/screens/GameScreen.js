@@ -10,22 +10,31 @@ import {
 } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 
-const fmt = (s) => {
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+const fmt = (ms) => {
+  if (ms <= 10000) {
+    const s = Math.floor(ms / 1000);
+    const cs = Math.floor((ms % 1000) / 10);
+    return `${String(s)}.${String(cs).padStart(2, '0')}`;
+  }
+  const totalSeconds = Math.ceil(ms / 1000);
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
 export default function GameScreen({ route, navigation }) {
   const { timeWhite, timeBlack, increment } = route.params;
   const { theme } = useTheme();
 
-  const [times, setTimes]   = useState([timeWhite, timeBlack]);
+  // Temps stocké en millisecondes
+  const [times, setTimes]   = useState([timeWhite * 1000, timeBlack * 1000]);
   const [active, setActive] = useState(null);
   const [paused, setPaused] = useState(false);
   const [moves,  setMoves]  = useState([0, 0]);
   const [over,   setOver]   = useState(false);
+
   const intervalRef = useRef(null);
+  const lastTickRef = useRef(null);
 
   useEffect(() => {
     activateKeepAwakeAsync();
@@ -37,14 +46,14 @@ export default function GameScreen({ route, navigation }) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    lastTickRef.current = null;
   };
 
-  // Reset propre quand on quitte l'écran (bouton retour Android)
   useFocusEffect(
     useCallback(() => {
       return () => {
         stopInterval();
-        setTimes([timeWhite, timeBlack]);
+        setTimes([timeWhite * 1000, timeBlack * 1000]);
         setActive(null);
         setPaused(false);
         setMoves([0, 0]);
@@ -55,10 +64,16 @@ export default function GameScreen({ route, navigation }) {
 
   const startInterval = useCallback((player) => {
     stopInterval();
+    lastTickRef.current = Date.now();
+
     intervalRef.current = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastTickRef.current;
+      lastTickRef.current = now;
+
       setTimes(prev => {
         const next = [...prev];
-        next[player] = Math.max(0, next[player] - 1);
+        next[player] = Math.max(0, next[player] - elapsed);
         if (next[player] === 0) {
           stopInterval();
           setOver(true);
@@ -66,7 +81,7 @@ export default function GameScreen({ route, navigation }) {
         }
         return next;
       });
-    }, 1000);
+    }, 100);
   }, []);
 
   useEffect(() => {
@@ -93,7 +108,7 @@ export default function GameScreen({ route, navigation }) {
 
     setTimes(prev => {
       const next = [...prev];
-      next[player] = next[player] + increment;
+      next[player] = next[player] + increment * 1000;
       return next;
     });
 
@@ -115,7 +130,7 @@ export default function GameScreen({ route, navigation }) {
 
   const handleReset = () => {
     stopInterval();
-    setTimes([timeWhite, timeBlack]);
+    setTimes([timeWhite * 1000, timeBlack * 1000]);
     setActive(null);
     setPaused(false);
     setMoves([0, 0]);
@@ -126,7 +141,7 @@ export default function GameScreen({ route, navigation }) {
 
   const renderZone = (player) => {
     const isActive  = active === player && !paused && !over;
-    const isUrgent  = times[player] <= 10 && times[player] > 0;
+    const isUrgent  = times[player] <= 10000 && times[player] > 0;
     const isDead    = over && times[player] === 0;
     const isWinner  = over && times[player] > 0;
     const flipped   = player === 0;
